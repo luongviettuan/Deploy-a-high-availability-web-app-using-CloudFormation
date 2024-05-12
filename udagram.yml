@@ -2,11 +2,11 @@ Description: Tuanlv12 / Deploy a high-availability web app using CloudFormation 
 
 Parameters:
   EnvironmentName:
-    Description: An environment name that will be prefixed to resource names
+    Description: My Develop Environment
     Type: String
 
 Resources:
-  # Security Group for Load Balancer
+  # SecurityGroup for Load Balancer (allow all traffic inbound port 80)
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -18,36 +18,37 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+      # SecurityGroupEgress:
+      #   - IpProtocol: tcp
+      #     FromPort: 80
+      #     ToPort: 80
+      #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-LB-Security-Group
+          Value: !Sub ${EnvironmentName}-Load-Balancer-Security-Group
 
-  # Security Group for Web Servers
-  WebServerSecGroup:
+  # SecurityGroup for Web App
+  WebAppSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow http to our hosts and SSH from local only
+      GroupDescription: Only allow http to our load balancer and SSH from local
       VpcId:
         Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
+          # CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref LBSecGroup
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 0
-          ToPort: 65535
-          CidrIp: 0.0.0.0/0
+          CidrIp: 58.186.70.0/15
+      # SecurityGroupEgress:
+      #   - IpProtocol: tcp
+      #     FromPort: 0
+      #     ToPort: 65535
+      #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-WebServer-Security-Group
@@ -56,19 +57,19 @@ Resources:
   BastionSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH to our jumpboxes
+      GroupDescription: Security group for bastion servers, Allow SSH to our jumpboxes
       VpcId:
         Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+          CidrIp: 58.186.70.0/15
+      # SecurityGroupEgress:
+      #   - IpProtocol: tcp
+      #     FromPort: 80
+      #     ToPort: 80
+      #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-Bastions-Security-Group
@@ -89,7 +90,7 @@ Resources:
           unzip -o udacity.zip
       ImageId: ami-0e001c9271cf7f3b9
       SecurityGroups:
-        - Ref: WebServerSecGroup
+        - Ref: WebAppSecGroup
       InstanceType: t3.medium
       BlockDeviceMappings:
         - DeviceName: "/dev/sdk"
@@ -226,9 +227,9 @@ Resources:
           SubnetId:
             Fn::ImportValue: !Sub "${EnvironmentName}-PUBL-NET-2"
 
-Outputs:
-  WebAppLB:
-    Description: The load balancer URL
-    Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName]]
-    Export:
-      Name: !Sub ${EnvironmentName}-LB-URL
+# Outputs:
+#   WebAppLB:
+#     Description: The load balancer URL
+#     Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName]]
+#     Export:
+#       Name: !Sub ${EnvironmentName}-LB-URL
