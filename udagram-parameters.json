@@ -2,5 +2,9 @@
   {
     "ParameterKey": "EnvironmentName",
     "ParameterValue": "tuanlv12-project2"
+  },
+  {
+    "ParameterKey": "MyIpAddress",
+    "ParameterValue": "58.186.70.0/15"
   }
 ]

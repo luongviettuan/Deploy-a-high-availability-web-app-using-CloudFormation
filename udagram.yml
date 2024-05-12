@@ -4,9 +4,12 @@ Parameters:
   EnvironmentName:
     Description: My Develop Environment
     Type: String
+  MyIpAddress:
+    Description: My IP Address
+    Type: String
 
 Resources:
-  # SecurityGroup for Load Balancer (allow all traffic inbound port 80)
+  #====== SecurityGroup Load Balancer (allow all traffic inbound port 80) =========#
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -18,42 +21,11 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-      # SecurityGroupEgress:
-      #   - IpProtocol: tcp
-      #     FromPort: 80
-      #     ToPort: 80
-      #     CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-Load-Balancer-Security-Group
 
-  # SecurityGroup for Web App
-  WebAppSecGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Only allow http to our load balancer and SSH from local
-      VpcId:
-        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          # CidrIp: 0.0.0.0/0
-          SourceSecurityGroupId: !Ref LBSecGroup
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 58.186.70.0/15
-      # SecurityGroupEgress:
-      #   - IpProtocol: tcp
-      #     FromPort: 0
-      #     ToPort: 65535
-      #     CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-WebServer-Security-Group
-
-  # Security Group for Bastion Host
+  #======= Security Group Bastion Host, using to our jumpboxes SSH to WebApp ========#
   BastionSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -64,94 +36,85 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 58.186.70.0/15
-      # SecurityGroupEgress:
-      #   - IpProtocol: tcp
-      #     FromPort: 80
-      #     ToPort: 80
-      #     CidrIp: 0.0.0.0/0
+          CidrIp: !Ref MyIpAddress
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-Bastions-Security-Group
 
-  # Launch configuration
-  WebAppLaunchConfig:
+  #===== SecurityGroup Web App (Load Balancer using port 80, SSH using port 22 through Bastion Server) ======#
+  WebAppSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Only allow http to our load balancer and SSH from local
+      VpcId:
+        Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LBSecGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-WebServer-Security-Group
+
+  
+  #=============== Launch configuration template ===============#
+  WebAppLaunchConfigTemplate:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
           sudo apt-get update -y
-          sudo apt-get install unzip awscli -y
-          sudo apt-get install apache2 -y
-          sudo systemctl start apache2.service
-          cd /var/www/html
-          aws s3 cp s3://francescoc-bucket/udacity.zip ./
-          unzip -o udacity.zip
+          sudo apt-get install nginx -y
+          sudo service nginx start
+          
+          WEB_DIR = "var/www/html"
+
+          cat <<<EOF > index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>It works! Udagram, Udacity</title>
+          </head>
+          <body>
+            <h1>It works! Udagram, Udacity</h1>
+            <p>This website is hosted on Nginx.</p>
+          </body>
+
+          sudo rm -r $WEB_DIR/index.*
+          sudo cp index.html $WEB_DIR
+          sudo systemctl reload nginx
+
       ImageId: ami-0e001c9271cf7f3b9
       SecurityGroups:
         - Ref: WebAppSecGroup
-      InstanceType: t3.medium
+      InstanceType: t2.micro
       BlockDeviceMappings:
         - DeviceName: "/dev/sdk"
           Ebs:
             VolumeSize: "10"
-      IamInstanceProfile: !Ref WebServerS3InstanceProfile
+      IamInstanceProfile: !Ref InstanceProfile
 
-  #Role for S3
-  ServerInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: ServerToS3-role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ec2.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Path: /
-
-  WebServerS3InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: ServerToS3-profile
-      Path: /
-      Roles:
-        - !Ref ServerInstanceRole
-
-  InstanceS3Policy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: S3Policy
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              s3:*
-              # - s3:*
-            Resource:
-              - arn:aws:s3:::francescoc-bucket/*
-              - arn:aws:s3:::francescoc-bucket
-      Roles:
-        - !Ref ServerInstanceRole
-
-  # Autoscaling Group
-  WebAppGroup:
+  #=============== Autoscaling Group =============#
+  AutoScalingWebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier:
         - Fn::ImportValue: !Sub "${EnvironmentName}-PRIV-NETS"
       LaunchConfigurationName:
-        Ref: WebAppLaunchConfig
-      MinSize: "4"
+        Ref: WebAppLaunchConfigTemplate
+      MinSize: "1"
       MaxSize: "4"
       TargetGroupARNs:
-        - Ref: WebAppTargetGroup
+        - Ref: TargetGroup
 
+
+  #=============== Create Load Balancer, Listener, Listener Rule, TargetGroup =================#
   # Load Balancer
   WebAppLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -168,7 +131,7 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn:
-            Ref: WebAppTargetGroup
+            Ref: TargetGroup
       LoadBalancerArn:
         Ref: WebAppLB
       Port: "80"
@@ -179,14 +142,14 @@ Resources:
     Properties:
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref "WebAppTargetGroup"
+          TargetGroupArn: !Ref "TargetGroup"
       Conditions:
         - Field: path-pattern
           Values: [/]
       ListenerArn: !Ref "Listener"
       Priority: 1
 
-  WebAppTargetGroup:
+  TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckIntervalSeconds: 10
@@ -200,8 +163,9 @@ Resources:
       VpcId:
         Fn::ImportValue: !Sub "${EnvironmentName}-VPCID"
 
-  # Bastion Hosts
-  BastionPriv1:
+
+  #========================== Create 2 Bastion corresponding to 2 Public Subnet ==========================#
+  BastionServer1:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-0e001c9271cf7f3b9
@@ -214,7 +178,7 @@ Resources:
           SubnetId:
             Fn::ImportValue: !Sub "${EnvironmentName}-PUBL-NET-1"
 
-  BastionPriv2:
+  BastionServer2:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-0e001c9271cf7f3b9
@@ -227,9 +191,57 @@ Resources:
           SubnetId:
             Fn::ImportValue: !Sub "${EnvironmentName}-PUBL-NET-2"
 
-# Outputs:
-#   WebAppLB:
-#     Description: The load balancer URL
-#     Value: !Join ["", ["http://", !GetAtt WebAppLB.DNSName]]
-#     Export:
-#       Name: !Sub ${EnvironmentName}-LB-URL
+
+
+  # =========== Connect Webapp to S3 ===============#
+  # Create S3 Bucket
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${EnvironmentName}-s3"
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  #IAMRole for S3
+  IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref EnvironmentName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: 'Allow'
+          Principal:
+            Service:
+            - 'ec2.amazonaws.com'
+          Action:
+          - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - 's3:PutObject'
+              - 's3:GetObject'
+              Resource:
+                - !GetAtt S3Bucket.Arn
+
+  # Set Role for Profile
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: '/'
+      Roles:
+      - !Ref IAMRole
