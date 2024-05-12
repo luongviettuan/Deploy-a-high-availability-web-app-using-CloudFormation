@@ -68,27 +68,32 @@ Resources:
     Properties:
       UserData:
         Fn::Base64: !Sub |
-          #!/bin/bash
-          sudo apt-get update -y
-          sudo apt-get install nginx -y
-          sudo service nginx start
-          
-          WEB_DIR = "var/www/html"
+            #!/bin/bash
+            apt-get update -y
+            sudo apt-get install nginx -y
+            service nginx start
 
-          cat <<<EOF > index.html
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>It works! Udagram, Udacity</title>
-          </head>
-          <body>
-            <h1>It works! Udagram, Udacity</h1>
-            <p>This website is hosted on Nginx.</p>
-          </body>
+            # Define the directory where the index.html will be placed
+            WEB_DIR="/var/www/html"
 
-          sudo rm -r $WEB_DIR/index.*
-          sudo cp index.html $WEB_DIR
-          sudo systemctl reload nginx
+            # Create a basic index.html file
+            cat <<EOF >index.html
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>It works! Udagram, Udacity</title>
+            </head>
+            <body>
+                <h1>It works! Udagram, Udacity</h1>
+                <p>This website is hosted on Nginx.</p>
+            </body>
+            </html>
+            EOF
+
+            # Copy index.html to the Nginx web directory
+            sudo rm -r $WEB_DIR/index.*
+            sudo cp index.html $WEB_DIR
+            sudo systemctl reload nginx
 
       ImageId: ami-0e001c9271cf7f3b9
       SecurityGroups:
